@@ -119,8 +119,13 @@ export function checkSpec(spec) {
       if (declared.readOnlyHint !== true || !tool.annotations.readOnlyHint) {
         errors.push(`${tool.name}: read tools must set annotations.readOnlyHint=true`);
       }
-      if (tool.annotations.destructiveHint) {
+      if (declared.destructiveHint === true) {
         errors.push(`${tool.name}: read tools cannot set annotations.destructiveHint=true`);
+      }
+      if (declared.openWorldHint === undefined) {
+        warnings.push(
+          `${tool.name}: read tool omits annotations.openWorldHint (MCP defaults it to true); set openWorldHint=false for closed-world tenant reads or openWorldHint=true for external/web reads`
+        );
       }
       if (tool.phase || tool.pair) {
         errors.push(`${tool.name}: read tools cannot set phase or pair`);
