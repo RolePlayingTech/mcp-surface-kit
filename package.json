@@ -1,6 +1,6 @@
 {
   "name": "mcp-surface-kit",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Record, explain and check an MCP tool surface: tiers, prepare/confirm pairs, skills and scopes.",
   "type": "module",
   "bin": {
@@ -11,8 +11,10 @@
     "src"
   ],
   "scripts": {
-    "test": "node --test tests/check.test.mjs tests/build.test.mjs",
-    "check": "node bin/mcp-surface.mjs check examples/content-workspace"
+    "test": "node --test tests/check.test.mjs tests/build.test.mjs tests/cli.test.mjs",
+    "check": "node bin/mcp-surface.mjs check examples/content-workspace --strict",
+    "explain": "node bin/mcp-surface.mjs explain examples/content-workspace",
+    "build:dry-run": "node bin/mcp-surface.mjs build examples/content-workspace --dry-run"
   },
   "keywords": [
     "mcp",
