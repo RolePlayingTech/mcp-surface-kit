@@ -49,6 +49,7 @@ export function explainData(spec, check) {
       scope: t.scope || null,
       operationScopes: t.operationScopes || {},
       annotations: t.annotations,
+      declaredAnnotations: t.declaredAnnotations,
       coveredBySkills: spec.skills.filter((s) => s.uses.includes(t.name)).map((s) => s.name),
     })),
     pairs,

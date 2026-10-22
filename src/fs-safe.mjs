@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 
 const SKILL_NAME_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-const TOOL_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/;
+const TOOL_NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 const WINDOWS_RESERVED_RE = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i;
 const FORBIDDEN_COPY_ROOTS = new Set(['.git', 'node_modules', '.mcp-surface', 'src', 'bin', 'tests']);
 
@@ -37,11 +37,11 @@ export function validateToolName(name) {
   if (typeof name !== 'string' || !name.trim()) {
     return 'every tool needs a name';
   }
-  if (name.length > 64) {
-    return `${name}: tool name longer than 64 characters`;
+  if (name.length > 128) {
+    return `${name}: tool name longer than 128 characters`;
   }
-  if (!TOOL_NAME_RE.test(name) || WINDOWS_RESERVED_RE.test(name)) {
-    return `${name}: tool name must use ASCII letters, digits, underscores or hyphens`;
+  if (!TOOL_NAME_RE.test(name)) {
+    return `${name}: tool name must use ASCII letters, digits, underscores, hyphens or dots (A-Za-z0-9_.-)`;
   }
   return null;
 }

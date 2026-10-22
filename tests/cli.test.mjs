@@ -52,18 +52,19 @@ test('check --strict fails on warnings while standard check passes', () => {
 
   const normal = run(['check', dir]);
   assert.equal(normal.code, 0);
+  assert.match(normal.text, /warning: get_context: read tool omits annotations\.openWorldHint/);
   assert.match(normal.text, /warning: get_context: no skill lists this tool in uses/);
 
   const strict = run(['check', dir, '--strict']);
   assert.equal(strict.code, 1);
-  assert.match(strict.text, /FAIL \(strict mode: 1 warning\(s\)\)/);
+  assert.match(strict.text, /FAIL \(strict mode: 2 warning\(s\)\)/);
 
   const strictJson = run(['check', dir, '--strict', '--json']);
   assert.equal(strictJson.code, 1);
   const parsed = JSON.parse(strictJson.text);
   assert.equal(parsed.ok, false);
   assert.equal(parsed.strict, true);
-  assert.equal(parsed.warningCount, 1);
+  assert.equal(parsed.warningCount, 2);
 });
 
 test('build --dry-run previews actions and diffs without writing, and build writes idempotently', () => {

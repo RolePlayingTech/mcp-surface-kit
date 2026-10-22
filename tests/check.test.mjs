@@ -3,6 +3,8 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { checkSpec } from '../src/check.mjs';
+import { explainData, formatExplain } from '../src/explain.mjs';
+import { validateSkillName, validateToolName } from '../src/fs-safe.mjs';
 import { loadSpec, normalizeSpec } from '../src/spec.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -335,4 +337,104 @@ test('warns when copySkillsTo lists both .agents/skills and .claude/skills', () 
   const res = checkSpec(spec);
   assert.equal(res.ok, true);
   assert.ok(res.warnings.some((w) => w.includes('multiple shared agent skill directories')));
+});
+
+test('read tool with omitted openWorldHint normalizes to true per MCP defaults and emits a warning (#7)', () => {
+  const implicitOpenWorld = normalizeSpec({
+    name: 'demo',
+    purpose: 'demo',
+    tools: [
+      {
+        name: 'search_web',
+        tier: 'read',
+        description: 'Search public pages',
+        annotations: { readOnlyHint: true },
+      },
+    ],
+    skills: [
+      {
+        name: 'web-search',
+        description: 'Search the web. Use when looking up public pages.',
+        uses: ['search_web'],
+      },
+    ],
+  });
+  assert.equal(implicitOpenWorld.tools[0].annotations.readOnlyHint, true);
+  assert.equal(implicitOpenWorld.tools[0].annotations.destructiveHint, true);
+  assert.equal(implicitOpenWorld.tools[0].annotations.idempotentHint, false);
+  assert.equal(implicitOpenWorld.tools[0].annotations.openWorldHint, true);
+  assert.equal(implicitOpenWorld.tools[0].declaredAnnotations.openWorldHint, undefined);
+
+  const checkImplicit = checkSpec(implicitOpenWorld);
+  assert.equal(checkImplicit.ok, true);
+  assert.ok(checkImplicit.warnings.some((w) => w.includes('search_web: read tool omits annotations.openWorldHint')));
+
+  const explained = explainData(implicitOpenWorld, checkImplicit);
+  assert.equal(explained.tools[0].annotations.openWorldHint, true);
+  assert.equal(explained.tools[0].declaredAnnotations.openWorldHint, undefined);
+  assert.match(formatExplain(implicitOpenWorld, checkImplicit), /search_web: read tool omits annotations\.openWorldHint/);
+
+  const explicitClosedWorld = normalizeSpec({
+    name: 'demo-closed',
+    purpose: 'demo',
+    tools: [
+      {
+        name: 'get_workspace_context',
+        tier: 'read',
+        description: 'Read tenant workspace context',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+    ],
+    skills: [
+      {
+        name: 'read-workspace',
+        description: 'Read workspace context. Use when grounding a session.',
+        uses: ['get_workspace_context'],
+      },
+    ],
+  });
+  assert.equal(explicitClosedWorld.tools[0].annotations.openWorldHint, false);
+  assert.equal(explicitClosedWorld.tools[0].declaredAnnotations.openWorldHint, false);
+  const checkClosed = checkSpec(explicitClosedWorld);
+  assert.equal(checkClosed.ok, true);
+  assert.equal(checkClosed.warnings.length, 0, checkClosed.warnings.join('; '));
+});
+
+test('accepts valid MCP 2026-07-28 tool names (dots and up to 128 chars) while keeping skill names strict (#8)', () => {
+  assert.equal(validateToolName('admin.tools.list'), null);
+  assert.equal(validateToolName('DATA_EXPORT_v2'), null);
+  assert.equal(validateToolName('a'.repeat(65)), null);
+  assert.equal(validateToolName('a'.repeat(128)), null);
+
+  assert.match(validateToolName('a'.repeat(129)), /longer than 128 characters/);
+  assert.match(validateToolName('admin tools'), /ASCII letters, digits, underscores, hyphens or dots/);
+  assert.match(validateToolName('admin/tools'), /ASCII letters, digits, underscores, hyphens or dots/);
+  assert.match(validateToolName('admin@tools'), /ASCII letters, digits, underscores, hyphens or dots/);
+
+  // Skill names remain strictly Agent Skills compliant (1-64 chars, lowercase a-z0-9-)
+  assert.match(validateSkillName('admin.tools.list'), /lowercase ASCII letters, digits and single hyphens/);
+  assert.match(validateSkillName('a'.repeat(65)), /longer than 64 characters/);
+
+  const spec = normalizeSpec({
+    name: 'mcp-names',
+    purpose: 'demo',
+    tools: [
+      {
+        name: 'admin.tools.list',
+        tier: 'read',
+        description: 'List admin tools',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+    ],
+    skills: [
+      {
+        name: 'admin-list',
+        description: 'List admin tools. Use when inspecting admin surface.',
+        uses: ['admin.tools.list'],
+      },
+    ],
+  });
+  const res = checkSpec(spec);
+  assert.equal(res.ok, true, res.errors.join('; '));
+  assert.equal(res.warnings.length, 0, res.warnings.join('; '));
 });

@@ -48,11 +48,11 @@ export function normalizeSpec(raw) {
 /**
  * Normalizes a tool entry.
  *
- * Official MCP ToolAnnotations specification defaults:
+ * Official MCP ToolAnnotations specification defaults (2026-07-28):
  * - readOnlyHint: false (when omitted, a tool is NOT assumed read-only)
- * - destructiveHint: true when readOnlyHint is false, false when readOnlyHint is true
+ * - destructiveHint: true (when omitted, defaults to true in the MCP schema; meaningful when readOnlyHint is false)
  * - idempotentHint: false (when omitted, a tool is NEVER assumed idempotent)
- * - openWorldHint: true when readOnlyHint is false, false when readOnlyHint is true
+ * - openWorldHint: true (when omitted, defaults to true regardless of readOnlyHint, e.g. read-only web search)
  */
 function normalizeTool(tool) {
   const rawAnnotations =
@@ -80,9 +80,9 @@ function normalizeTool(tool) {
   };
 
   const readOnlyHint = declaredAnnotations.readOnlyHint ?? false;
-  const destructiveHint = declaredAnnotations.destructiveHint ?? !readOnlyHint;
+  const destructiveHint = declaredAnnotations.destructiveHint ?? true;
   const idempotentHint = declaredAnnotations.idempotentHint ?? false;
-  const openWorldHint = declaredAnnotations.openWorldHint ?? !readOnlyHint;
+  const openWorldHint = declaredAnnotations.openWorldHint ?? true;
 
   const operationScopes = {};
   const invalidOperationScopes = [];

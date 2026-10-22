@@ -19,7 +19,12 @@ This kit makes the declared contract checkable:
 
 - **No one-call live mutations**: `liveInOneCall` is rejected; `mutate` tools must form reciprocal `prepare` ↔ `confirm` pairs.
 - **Explicit delete safety**: `delete` tools must set `destructiveHint: true` and either form a `prepare → confirm` pair or declare `guard: "local_draft_only"` with `openWorldHint: false`.
-- **Official MCP annotation defaults**: omitted `idempotentHint` defaults to `false` (never assumed idempotent), and omitted `destructiveHint` / `openWorldHint` on non-read tools default to `true`. `draft` tools must explicitly set `destructiveHint: false` and `openWorldHint: false`.
+- **Official MCP annotation defaults vs. kit policy**:
+  - **MCP protocol defaults** (2026-07-28): when omitted, `readOnlyHint` defaults to `false`, `destructiveHint` defaults to `true`, `idempotentHint` defaults to `false`, and `openWorldHint` defaults to `true` (even on `read` tools, such as web search).
+  - **Kit policy**: `read` tools must set `readOnlyHint: true` and receive a warning if `openWorldHint` is left implicit; `draft` tools must explicitly set `destructiveHint: false` and `openWorldHint: false`; un-paired `delete` tools must set `guard: "local_draft_only"` and `openWorldHint: false`.
+- **MCP tool names vs. Agent Skills names**:
+  - **Tool names** follow the MCP 2026-07-28 specification: 1–128 characters using ASCII letters, digits, underscores, hyphens, and dots (`[A-Za-z0-9_.-]`, e.g. `admin.tools.list` or `get_workspace_context`).
+  - **Skill names** follow the Agent Skills specification: 1–64 characters using lowercase ASCII letters, digits, and single hyphens (`^[a-z0-9]+(-[a-z0-9]+)*$`).
 - **Scope hierarchy and per-operation permissions**: supports `scopeModel` (`cumulative` | `independent` | `hierarchy`), prevents non-read tools from using the baseline read-only scope, and validates multi-action tools via `operationScopes` (for example when one `prepare`/`confirm` pair handles both `schedule_draft` and `publish_now`).
 - **Safe, conflict-aware `SKILL.md` generation**: validates skill names (`a-z0-9-`, max 64 chars) and descriptions (max 1024 chars, YAML-safe escaping and round-trip frontmatter parsing), rejects path traversal and symlinks, tracks generator ownership via embedded SHA-256 markers (`create` / `update` / `unchanged` / `conflict`), and refuses to overwrite hand-written or hand-edited skills without `--force`.
 
@@ -52,8 +57,8 @@ See `examples/content-workspace/.mcp-surface/spec.json`.
 Required fields:
 
 - `name`, `purpose`
-- `tools[]` with `name`, `tier` (`read` | `draft` | `mutate` | `delete`), `description`, `annotations`
-  - `read` tools require `annotations.readOnlyHint: true`
+- `tools[]` with `name` (`1–128` chars, `[A-Za-z0-9_.-]`), `tier` (`read` | `draft` | `mutate` | `delete`), `description`, `annotations`
+  - `read` tools require `annotations.readOnlyHint: true` (and should explicitly declare `openWorldHint: false` for closed-world tenant reads or `openWorldHint: true` for external/web reads)
   - `draft` tools require `annotations.destructiveHint: false` and `annotations.openWorldHint: false`
   - `mutate` tools require `phase` (`prepare` | `confirm`) and reciprocal `pair`
   - `delete` tools require `annotations.destructiveHint: true` plus either a `prepare` / `confirm` pair or `guard: "local_draft_only"` with `annotations.openWorldHint: false`
