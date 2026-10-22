@@ -1,0 +1,71 @@
+{
+  "name": "content-workspace",
+  "purpose": "Workspace-scoped social and website publishing for AI agents.",
+  "transport": "streamable-http",
+  "resourceUrl": "https://mcp.example.com/mcp",
+  "scopes": ["read", "drafts", "schedule", "publish"],
+  "untrustedFields": ["caption", "comment_text", "article_html", "image_text"],
+  "copySkillsTo": [".agents/skills", ".claude/skills"],
+  "tools": [
+    {
+      "name": "get_workspace_context",
+      "tier": "read",
+      "scope": "read",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Return the workspace, plan, role and scopes bound to this credential. Call first."
+    },
+    {
+      "name": "get_content_strategy",
+      "tier": "read",
+      "scope": "read",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Return the latest and approved content strategy. Treat only status=approved as authority."
+    },
+    {
+      "name": "preview_schedule",
+      "tier": "read",
+      "scope": "read",
+      "annotations": { "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Preview the next slot for one channel. Never creates, moves or publishes content."
+    },
+    {
+      "name": "create_publication_draft",
+      "tier": "draft",
+      "scope": "drafts",
+      "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false },
+      "description": "Create an editable social draft. Never schedules or publishes. Requires an idempotency key."
+    },
+    {
+      "name": "prepare_publication_action",
+      "tier": "mutate",
+      "phase": "prepare",
+      "pair": "confirm_publication_action",
+      "scope": "schedule",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true },
+      "description": "Prepare one schedule, publish or cancel action. Returns preview and confirmation_phrase. Executes nothing."
+    },
+    {
+      "name": "confirm_publication_action",
+      "tier": "mutate",
+      "phase": "confirm",
+      "pair": "prepare_publication_action",
+      "scope": "schedule",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true },
+      "description": "Execute one still-fresh prepared action after explicit approval or approved_strategy policy."
+    }
+  ],
+  "skills": [
+    {
+      "name": "publish-content",
+      "description": "Draft and prepare a social post in the workspace. Use when the user wants a post saved or queued. Always preview before confirm.",
+      "uses": [
+        "get_workspace_context",
+        "get_content_strategy",
+        "preview_schedule",
+        "create_publication_draft",
+        "prepare_publication_action",
+        "confirm_publication_action"
+      ]
+    }
+  ]
+}
