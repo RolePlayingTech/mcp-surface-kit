@@ -3,9 +3,10 @@
   "purpose": "Workspace-scoped social and website publishing for AI agents.",
   "transport": "streamable-http",
   "resourceUrl": "https://mcp.example.com/mcp",
+  "scopeModel": "cumulative",
   "scopes": ["read", "drafts", "schedule", "publish"],
   "untrustedFields": ["caption", "comment_text", "article_html", "image_text"],
-  "copySkillsTo": [".agents/skills", ".claude/skills"],
+  "copySkillsTo": [".claude/skills"],
   "tools": [
     {
       "name": "get_workspace_context",
@@ -36,11 +37,24 @@
       "description": "Create an editable social draft. Never schedules or publishes. Requires an idempotency key."
     },
     {
+      "name": "delete_publication_draft",
+      "tier": "delete",
+      "guard": "local_draft_only",
+      "scope": "drafts",
+      "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": false },
+      "description": "Delete an unpublished workspace draft. Never touches scheduled or published provider posts."
+    },
+    {
       "name": "prepare_publication_action",
       "tier": "mutate",
       "phase": "prepare",
       "pair": "confirm_publication_action",
       "scope": "schedule",
+      "operationScopes": {
+        "schedule_draft": "schedule",
+        "cancel": "schedule",
+        "publish_now": "publish"
+      },
       "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true },
       "description": "Prepare one schedule, publish or cancel action. Returns preview and confirmation_phrase. Executes nothing."
     },
@@ -50,6 +64,11 @@
       "phase": "confirm",
       "pair": "prepare_publication_action",
       "scope": "schedule",
+      "operationScopes": {
+        "schedule_draft": "schedule",
+        "cancel": "schedule",
+        "publish_now": "publish"
+      },
       "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": true, "openWorldHint": true },
       "description": "Execute one still-fresh prepared action after explicit approval or approved_strategy policy."
     }
@@ -63,6 +82,7 @@
         "get_content_strategy",
         "preview_schedule",
         "create_publication_draft",
+        "delete_publication_draft",
         "prepare_publication_action",
         "confirm_publication_action"
       ]
