@@ -438,3 +438,102 @@ test('accepts valid MCP 2026-07-28 tool names (dots and up to 128 chars) while k
   assert.equal(res.ok, true, res.errors.join('; '));
   assert.equal(res.warnings.length, 0, res.warnings.join('; '));
 });
+
+
+test('rejects unknown and misspelled fields at root, product, tools, annotations, and skills while allowing x-* extensions (#10)', () => {
+  const withUnsupportedFields = normalizeSpec({
+    version: 1,
+    name: 'field-notes',
+    purpose: 'Release notes service',
+    untrustedContent: ['caption'],
+    copySkillTo: ['.claude/skills'],
+    product: {
+      untrustedContent: ['note_markdown'],
+    },
+    tools: [
+      {
+        name: 'list_notes',
+        tier: 'read',
+        description: 'List notes',
+        annotation: { readOnlyHint: true, openWorldHint: false },
+      },
+      {
+        name: 'create_note_draft',
+        tier: 'draft',
+        requiresIdempotencyKey: true,
+        description: 'Save draft',
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+          readOnly: false,
+        },
+      },
+    ],
+    skills: [
+      {
+        name: 'publish-notes',
+        description: 'Draft notes. Use when writing release notes.',
+        uses: ['list_notes', 'create_note_draft'],
+        steps: ['Call list_notes first', 'Call create_note_draft second'],
+      },
+    ],
+  });
+
+  const res = checkSpec(withUnsupportedFields);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes('unknown field "version"')));
+  assert.ok(res.errors.some((e) => e.includes('unknown field "untrustedContent"') && e.includes('untrustedFields')));
+  assert.ok(res.errors.some((e) => e.includes('unknown field "copySkillTo"') && e.includes('copySkillsTo')));
+  assert.ok(res.errors.some((e) => e.includes('unknown field "product"')));
+  assert.ok(res.errors.some((e) => e.includes('unknown field "product.untrustedContent"') && e.includes('untrustedFields')));
+  assert.ok(res.errors.some((e) => e.includes('list_notes: unknown field "tools[0].annotation"') && e.includes('annotations')));
+  assert.ok(
+    res.errors.some(
+      (e) =>
+        e.includes('create_note_draft: unknown field "tools[1].requiresIdempotencyKey"') &&
+        e.includes('annotations.idempotentHint')
+    )
+  );
+  assert.ok(
+    res.errors.some(
+      (e) => e.includes('create_note_draft: unknown annotation "tools[1].annotations.readOnly"') && e.includes('readOnlyHint')
+    )
+  );
+  assert.ok(
+    res.errors.some((e) => e.includes('publish-notes: unknown field "skills[0].steps"') && e.includes('derived from "uses"'))
+  );
+
+  // Namespaced x-* extensions and $schema remain valid
+  const withExtensions = normalizeSpec({
+    $schema: 'https://example.com/mcp-surface.schema.json',
+    'x-version': 1,
+    name: 'ext-ok',
+    purpose: 'Extension test',
+    tools: [
+      {
+        name: 'get_context',
+        tier: 'read',
+        description: 'Read context',
+        'x-rate-limit': '60/min',
+        annotations: {
+          readOnlyHint: true,
+          openWorldHint: false,
+          'x-audit-level': 'low',
+        },
+      },
+    ],
+    skills: [
+      {
+        name: 'read-context',
+        description: 'Read context. Use when grounding a session.',
+        uses: ['get_context'],
+        'x-owner': 'platform',
+      },
+    ],
+  });
+  const extRes = checkSpec(withExtensions);
+  assert.equal(extRes.ok, true, extRes.errors.join('; '));
+  assert.equal(extRes.warnings.length, 0, extRes.warnings.join('; '));
+});
