@@ -27,6 +27,9 @@ function hasHierarchyCycle(hierarchy) {
 export function checkSpec(spec) {
   const errors = [];
   const warnings = [];
+  for (const msg of spec.invalidFields || []) {
+    errors.push(msg);
+  }
   if (!spec.name) errors.push('spec.name is required.');
   if (!spec.purpose) errors.push('spec.purpose is required (one sentence).');
   if (!spec.tools.length) errors.push('spec.tools must list at least one tool.');
@@ -90,7 +93,11 @@ export function checkSpec(spec) {
   }
 
   const byName = new Map();
-  for (const tool of spec.tools) {
+  for (const [toolIdx, tool] of spec.tools.entries()) {
+    const toolLabel = tool.name || `tools[${toolIdx}]`;
+    for (const msg of tool.invalidFields || []) {
+      errors.push(`${toolLabel}: ${msg}`);
+    }
     const nameErr = validateToolName(tool.name);
     if (nameErr) {
       errors.push(nameErr);
@@ -303,7 +310,11 @@ export function checkSpec(spec) {
 
   const covered = new Set();
   const seenSkills = new Set();
-  for (const skill of spec.skills) {
+  for (const [skillIdx, skill] of spec.skills.entries()) {
+    const label = skill.name || `skills[${skillIdx}]`;
+    for (const msg of skill.invalidFields || []) {
+      errors.push(`${label}: ${msg}`);
+    }
     const skillNameErr = validateSkillName(skill.name);
     if (skillNameErr) {
       errors.push(skillNameErr);
@@ -312,7 +323,6 @@ export function checkSpec(spec) {
     }
     if (skill.name) seenSkills.add(skill.name);
 
-    const label = skill.name || 'skill';
     if (!skill.description) {
       errors.push(`${label}: description is required`);
     } else {
