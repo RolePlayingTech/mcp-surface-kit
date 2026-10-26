@@ -9,12 +9,32 @@ import { loadSpec, normalizeSpec } from '../src/spec.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-test('example content-workspace spec passes with zero errors and zero warnings', () => {
+test('example content-workspace spec passes with zero errors and zero warnings and separates publishing from draft deletion (#16)', () => {
   const spec = loadSpec(join(root, 'examples/content-workspace'));
   const result = checkSpec(spec);
   assert.equal(result.ok, true, result.errors.join('; '));
   assert.equal(result.errors.length, 0);
   assert.equal(result.warnings.length, 0, result.warnings.join('; '));
+
+  assert.deepEqual(
+    spec.skills.map((s) => s.name),
+    ['publish-content', 'delete-draft']
+  );
+  const publishSkill = spec.skills.find((s) => s.name === 'publish-content');
+  assert.ok(publishSkill);
+  assert.equal(publishSkill.uses.includes('delete_publication_draft'), false);
+  assert.deepEqual(publishSkill.uses, [
+    'get_workspace_context',
+    'get_content_strategy',
+    'preview_schedule',
+    'create_publication_draft',
+    'prepare_publication_action',
+    'confirm_publication_action',
+  ]);
+
+  const deleteSkill = spec.skills.find((s) => s.name === 'delete-draft');
+  assert.ok(deleteSkill);
+  assert.deepEqual(deleteSkill.uses, ['get_workspace_context', 'delete_publication_draft']);
 });
 
 test('a one-call publish tool fails check', () => {

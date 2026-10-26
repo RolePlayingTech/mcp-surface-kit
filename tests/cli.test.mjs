@@ -15,18 +15,34 @@ test('explain outputs tools, tiers, prepare/confirm pairs, skills and uncovered 
   assert.match(res.text, /MCP surface: content-workspace/);
   assert.match(res.text, /Prepare -> Confirm pairs/);
   assert.match(res.text, /prepare_publication_action -> confirm_publication_action/);
-  assert.match(res.text, /Uncovered tools/);
+  assert.match(
+    res.text,
+    /publish-content: Draft and prepare a social post in the workspace\. Use when the user wants a post saved or queued\. Always preview before confirm\.\n\s+uses: get_workspace_context, get_content_strategy, preview_schedule, create_publication_draft, prepare_publication_action, confirm_publication_action/
+  );
+  assert.match(
+    res.text,
+    /delete-draft: Delete an unpublished workspace draft\. Use when the user explicitly requests deletion of a local unpublished draft\. Never delete scheduled or published provider content\.\n\s+uses: get_workspace_context, delete_publication_draft/
+  );
+  assert.match(res.text, /Uncovered tools\n  \(none — all tools are referenced by at least one skill\)/);
   assert.match(res.text, /Check: surface is internally consistent\./);
 });
 
-test('explain --json returns stable machine-readable payload', () => {
+test('explain --json and check --strict return valid machine-readable payload for content-workspace', () => {
   const res = run(['explain', exampleDir, '--json']);
   assert.equal(res.code, 0);
   const parsed = JSON.parse(res.text);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.name, 'content-workspace');
   assert.equal(parsed.pairs.length, 1);
+  assert.deepEqual(
+    parsed.skills.map((s) => s.name),
+    ['publish-content', 'delete-draft']
+  );
   assert.deepEqual(parsed.uncoveredTools, []);
+
+  const strictCheck = run(['check', exampleDir, '--strict']);
+  assert.equal(strictCheck.code, 0);
+  assert.equal(strictCheck.text, 'PASS: MCP surface spec is internally consistent (strict mode, 0 warnings).');
 });
 
 test('check --strict fails on warnings while standard check passes', () => {
@@ -78,19 +94,20 @@ test('build --dry-run previews actions and diffs without writing, and build writ
 
   const dry = run(['build', dir, '--dry-run']);
   assert.equal(dry.code, 0);
-  assert.match(dry.text, /Dry run \(nothing written\) — create: 2, update: 0, unchanged: 0, conflict: 0/);
+  assert.match(dry.text, /Dry run \(nothing written\) — create: 4, update: 0, unchanged: 0, conflict: 0/);
   assert.match(dry.text, /\+\+\+ b\/\.mcp-surface\/skills\/publish-content\/SKILL\.md/);
+  assert.match(dry.text, /\+\+\+ b\/\.mcp-surface\/skills\/delete-draft\/SKILL\.md/);
   assert.equal(existsSync(join(dir, '.mcp-surface', 'skills')), false);
 
   const firstBuild = run(['build', dir]);
   assert.equal(firstBuild.code, 0);
-  assert.match(firstBuild.text, /Wrote 2 skill file\(s\)/);
+  assert.match(firstBuild.text, /Wrote 4 skill file\(s\)/);
 
   const secondBuild = run(['build', dir, '--json']);
   assert.equal(secondBuild.code, 0);
   const parsed = JSON.parse(secondBuild.text);
   assert.equal(parsed.written, 0);
-  assert.equal(parsed.counts.unchanged, 2);
+  assert.equal(parsed.counts.unchanged, 4);
 });
 
 
