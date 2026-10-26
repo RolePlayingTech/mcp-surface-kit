@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { applyBuild, parseSkillFrontmatter, planBuild, renderSkill } from '../src/build.mjs';
+import { applyBuild, parseSkillFrontmatter, planBuild, renderSkill, verifyManagedContent } from '../src/build.mjs';
 import { loadSpec, normalizeSpec } from '../src/spec.mjs';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,20 +14,46 @@ test('build writes SKILL.md with frontmatter, responsibility boundary, expiry an
   const spec = loadSpec(join(root, 'examples/content-workspace'));
   const dir = mkdtempSync(join(tmpdir(), 'mcp-surface-'));
   const files = applyBuild(planBuild(spec, dir));
-  const skill = files.find((file) => file.path.endsWith(join('publish-content', 'SKILL.md')));
-  assert.ok(skill);
-  const body = readFileSync(skill.path, 'utf8');
+  assert.equal(files.length, 4);
+
+  const publishSkill = files.find((file) => file.relPath === '.mcp-surface/skills/publish-content/SKILL.md');
+  assert.ok(publishSkill);
+  const body = readFileSync(publishSkill.path, 'utf8');
   assert.match(body, /^---\nname: publish-content\n/);
   assert.match(body, /Use when/);
+  assert.doesNotMatch(body, /delete_publication_draft/);
   assert.match(body, /prepare_publication_action/);
   assert.match(body, /STOP unless confirmation_mode=approved_strategy/);
   assert.match(body, /expired or the payload changed/);
   assert.match(body, /Responsibility boundary/);
   assert.match(body, /untrusted data/);
 
+  const draftIdx = body.indexOf('4. `create_publication_draft`');
+  const prepareIdx = body.indexOf('5. `prepare_publication_action`');
+  const confirmIdx = body.indexOf('6. `confirm_publication_action`');
+  assert.ok(draftIdx !== -1, 'publish-content must include step 4 create_publication_draft');
+  assert.ok(prepareIdx > draftIdx, 'prepare_publication_action must immediately follow create_publication_draft');
+  assert.ok(confirmIdx > prepareIdx, 'confirm_publication_action must follow prepare_publication_action');
+
   const parsed = parseSkillFrontmatter(body);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.data.name, 'publish-content');
+  assert.deepEqual(verifyManagedContent(body), { managed: true, unedited: true });
+
+  const deleteSkill = files.find((file) => file.relPath === '.mcp-surface/skills/delete-draft/SKILL.md');
+  assert.ok(deleteSkill);
+  const deleteBody = readFileSync(deleteSkill.path, 'utf8');
+  assert.match(deleteBody, /^---\nname: delete-draft\n/);
+  assert.match(deleteBody, /Use when the user explicitly requests deletion of a local unpublished draft/);
+  assert.match(deleteBody, /1\. `get_workspace_context`/);
+  assert.match(deleteBody, /2\. `delete_publication_draft` \(`delete:local_draft_only`, scope: `drafts`\)/);
+  assert.doesNotMatch(deleteBody, /prepare_publication_action/);
+  assert.doesNotMatch(deleteBody, /confirm_publication_action/);
+
+  const parsedDelete = parseSkillFrontmatter(deleteBody);
+  assert.equal(parsedDelete.ok, true);
+  assert.equal(parsedDelete.data.name, 'delete-draft');
+  assert.deepEqual(verifyManagedContent(deleteBody), { managed: true, unedited: true });
 });
 
 test('YAML frontmatter safely escapes colons, quotes, hashes and multiline descriptions', () => {
@@ -198,7 +224,7 @@ test('transactional rollback restores prior state when a write fails mid-build',
   const dir = mkdtempSync(join(tmpdir(), 'mcp-surface-tx-'));
   const spec = loadSpec(join(root, 'examples/content-workspace'));
   const planned = planBuild(spec, dir);
-  assert.equal(planned.length, 2);
+  assert.equal(planned.length, 4);
 
   let writeCalls = 0;
   const faultyIo = {
@@ -213,6 +239,7 @@ test('transactional rollback restores prior state when a write fails mid-build',
   };
 
   assert.throws(() => applyBuild(planned, { io: faultyIo }), /prior file state restored/);
-  assert.equal(existsSync(planned[0].path), false, 'first created file must be rolled back');
-  assert.equal(existsSync(planned[1].path), false, 'second file must not exist');
+  for (const file of planned) {
+    assert.equal(existsSync(file.path), false, `${file.relPath} must not exist after rollback`);
+  }
 });

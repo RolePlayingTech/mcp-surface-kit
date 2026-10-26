@@ -51,6 +51,11 @@ npm run build:dry-run
 
 `examples/content-workspace` is a MUMRO-shaped publishing workspace with a compact tool list covering all four tiers (`read`, `draft`, `delete` with `local_draft_only`, and `mutate` with `prepare → confirm` + `operationScopes`) — enough to practise, not a clone of any production gateway.
 
+Because every entry in `skills[].uses` is rendered as a sequential step in that skill's `## Workflow`, a four-tier surface does **not** put every tool into a single skill. Instead, `examples/content-workspace` separates distinct user intents into dedicated skills:
+
+- **`publish-content` (publishing workflow)**: for an explicit request to schedule or publish a post (not merely save a draft), reads workspace context, approved strategy and the next schedule slot (`get_workspace_context`, `get_content_strategy`, `preview_schedule`), creates an editable draft (`create_publication_draft`), stages the action (`prepare_publication_action`), and confirms (`confirm_publication_action`) only after fresh explicit user approval or a server-verified, owner-authorized `approved_strategy` policy — never deleting the draft it just created.
+- **`delete-draft` (draft deletion workflow)**: checks workspace context (`get_workspace_context`) and deletes an unpublished local draft (`delete_publication_draft` with `guard: "local_draft_only"`) only when the user explicitly requests draft deletion.
+
 ## Canonical minimal spec (`.mcp-surface/spec.json`)
 
 ```json
