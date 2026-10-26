@@ -76,7 +76,7 @@
   "skills": [
     {
       "name": "publish-content",
-      "description": "Draft and prepare a social post in the workspace. Use when the user wants a post saved or queued. Always preview before confirm.",
+      "description": "Draft and prepare a social post for scheduling or publishing. Use when the user explicitly asks to schedule or publish a post, not merely save a draft. Preview first; confirm only after fresh user approval or a server-verified owner-authorized approved_strategy policy.",
       "uses": [
         "get_workspace_context",
         "get_content_strategy",

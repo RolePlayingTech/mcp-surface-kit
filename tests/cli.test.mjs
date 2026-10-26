@@ -17,7 +17,7 @@ test('explain outputs tools, tiers, prepare/confirm pairs, skills and uncovered 
   assert.match(res.text, /prepare_publication_action -> confirm_publication_action/);
   assert.match(
     res.text,
-    /publish-content: Draft and prepare a social post in the workspace\. Use when the user wants a post saved or queued\. Always preview before confirm\.\n\s+uses: get_workspace_context, get_content_strategy, preview_schedule, create_publication_draft, prepare_publication_action, confirm_publication_action/
+    /publish-content: Draft and prepare a social post for scheduling or publishing\. Use when the user explicitly asks to schedule or publish a post, not merely save a draft\. Preview first; confirm only after fresh user approval or a server-verified owner-authorized approved_strategy policy\.\n\s+uses: get_workspace_context, get_content_strategy, preview_schedule, create_publication_draft, prepare_publication_action, confirm_publication_action/
   );
   assert.match(
     res.text,
