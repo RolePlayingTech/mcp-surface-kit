@@ -152,7 +152,7 @@ export function specPath(dir) {
 }
 
 export function loadSpec(dir) {
-  const raw = JSON.parse(readFileSync(specPath(dir), 'utf8'));
+  const raw = JSON.parse(readFileSync(specPath(dir), 'utf8').replace(/^\uFEFF/, ''));
   return normalizeSpec(raw);
 }
 

@@ -240,4 +240,9 @@ test('Academy Lesson 14 field-notes mini-lab broken and repaired fixtures match 
   assert.match(skillText, /<!-- mcp-surface-kit:managed sha256=fc3052dd77ffb6e8b9a7a33c38b03f55a442ca2063641c4a99af713527cfc3d4 -->/);
   assert.match(skillText, /## Responsibility boundary/);
   assert.match(skillText, /## Workflow/);
+
+  // Windows PowerShell 5.1 Set-Content -Encoding utf8 prepends a UTF-8 BOM (\uFEFF)
+  writeFileSync(join(dir, '.mcp-surface', 'spec.json'), `\uFEFF${JSON.stringify(fixedSpec, null, 2)}`, 'utf8');
+  const bomCheckRes = run(['check', dir, '--strict']);
+  assert.equal(bomCheckRes.code, 0);
 });
