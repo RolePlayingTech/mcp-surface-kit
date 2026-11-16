@@ -636,7 +636,7 @@ test('validates transport, resourceUrl, operationScopes key syntax, and scopeHie
   assert.ok(res2.warnings.some((w) => w.includes('plaintext http:// on non-loopback host')));
 
   // Loopback http:// for local dev does not warn, whereas stdio + resourceUrl warns
-  const loopbackHttp = normalizeSpec({
+  const loopbackHttpRaw = {
     name: 'local-dev',
     purpose: 'Local loopback MCP.',
     transport: 'streamable-http',
@@ -656,18 +656,18 @@ test('validates transport, resourceUrl, operationScopes key syntax, and scopeHie
         uses: ['get_state'],
       },
     ],
-  });
-  const res3 = checkSpec(loopbackHttp);
+  };
+  const res3 = checkSpec(normalizeSpec(loopbackHttpRaw));
   assert.equal(res3.ok, true, res3.errors.join('; '));
   assert.equal(res3.warnings.length, 0, res3.warnings.join('; '));
 
   const stdioWithUrl = normalizeSpec({
-    ...loopbackHttp,
+    ...loopbackHttpRaw,
     transport: 'stdio',
     resourceUrl: 'https://mcp.example.com/mcp',
   });
   const res4 = checkSpec(stdioWithUrl);
-  assert.equal(res4.ok, true);
+  assert.equal(res4.ok, true, res4.errors.join('; '));
   assert.ok(res4.warnings.some((w) => w.includes('spec.resourceUrl is set while spec.transport is "stdio"')));
 });
 
