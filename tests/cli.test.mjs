@@ -237,7 +237,8 @@ test('Academy Lesson 14 field-notes mini-lab broken and repaired fixtures match 
   );
 
   const skillText = readFileSync(join(dir, '.mcp-surface', 'skills', 'publish-notes', 'SKILL.md'), 'utf8');
-  assert.match(skillText, /<!-- mcp-surface-kit:managed sha256=fc3052dd77ffb6e8b9a7a33c38b03f55a442ca2063641c4a99af713527cfc3d4 -->/);
+  assert.match(skillText, /<!-- mcp-surface-kit:managed sha256=b629dd8c14bd7b7350cde4ce032c60a380330dbea44e8c7c52c1e5118737b842 -->/);
+  assert.doesNotMatch(skillText, /approved_strategy/);
   assert.match(skillText, /## Responsibility boundary/);
   assert.match(skillText, /## Workflow/);
 
@@ -245,4 +246,58 @@ test('Academy Lesson 14 field-notes mini-lab broken and repaired fixtures match 
   writeFileSync(join(dir, '.mcp-surface', 'spec.json'), `\uFEFF${JSON.stringify(fixedSpec, null, 2)}`, 'utf8');
   const bomCheckRes = run(['check', dir, '--strict']);
   assert.equal(bomCheckRes.code, 0);
+});
+
+test('CLI check --strict detects orphaned managed skills and build --prune removes them (#12, #15)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-surface-cli-prune-'));
+  mkdirSync(join(dir, '.mcp-surface'), { recursive: true });
+  const specObj = {
+    name: 'cli-prune',
+    purpose: 'CLI orphan detection test.',
+    copySkillsTo: ['.claude/skills'],
+    tools: [
+      {
+        name: 'get_status',
+        tier: 'read',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        description: 'Read status.',
+      },
+    ],
+    skills: [
+      {
+        name: 'status-check',
+        description: 'Read status. Use when checking status.',
+        uses: ['get_status'],
+      },
+      {
+        name: 'legacy-skill',
+        description: 'Legacy skill. Use when legacy.',
+        uses: ['get_status'],
+      },
+    ],
+  };
+  writeFileSync(join(dir, '.mcp-surface', 'spec.json'), JSON.stringify(specObj, null, 2), 'utf8');
+  assert.equal(run(['build', dir]).code, 0);
+
+  // Drop legacy-skill from spec.json
+  specObj.skills = [specObj.skills[0]];
+  writeFileSync(join(dir, '.mcp-surface', 'spec.json'), JSON.stringify(specObj, null, 2), 'utf8');
+
+  const strictBefore = run(['check', dir, '--strict']);
+  assert.equal(strictBefore.code, 1);
+  assert.match(strictBefore.text, /orphan managed skill "\.mcp-surface\/skills\/legacy-skill\/SKILL\.md"/);
+  assert.match(strictBefore.text, /mcp-surface build --prune/);
+
+  const dryPrune = run(['build', dir, '--dry-run', '--prune']);
+  assert.equal(dryPrune.code, 0);
+  assert.match(dryPrune.text, /delete: 2/);
+  assert.equal(existsSync(join(dir, '.claude', 'skills', 'legacy-skill', 'SKILL.md')), true);
+
+  const applyPrune = run(['build', dir, '--prune']);
+  assert.equal(applyPrune.code, 0);
+  assert.match(applyPrune.text, /delete: 2/);
+  assert.equal(existsSync(join(dir, '.claude', 'skills', 'legacy-skill')), false);
+
+  const strictAfter = run(['check', dir, '--strict']);
+  assert.equal(strictAfter.code, 0);
 });

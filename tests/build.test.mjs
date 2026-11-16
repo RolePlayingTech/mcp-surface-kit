@@ -243,3 +243,136 @@ test('transactional rollback restores prior state when a write fails mid-build',
     assert.equal(existsSync(file.path), false, `${file.relPath} must not exist after rollback`);
   }
 });
+
+test('renderSkill generates product-agnostic guidance by default and only emits delegatedApprovalMode when declared (#14)', () => {
+  const neutralSpec = normalizeSpec({
+    name: 'acme-tickets',
+    purpose: 'Issue tracker MCP surface.',
+    tools: [
+      {
+        name: 'prepare_close_ticket',
+        tier: 'mutate',
+        phase: 'prepare',
+        pair: 'confirm_close_ticket',
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Prepare closing a ticket.',
+      },
+      {
+        name: 'confirm_close_ticket',
+        tier: 'mutate',
+        phase: 'confirm',
+        pair: 'prepare_close_ticket',
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Confirm closing a ticket.',
+      },
+      {
+        name: 'prepare_purge_archive',
+        tier: 'delete',
+        phase: 'prepare',
+        pair: 'confirm_purge_archive',
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Prepare archive deletion.',
+      },
+      {
+        name: 'confirm_purge_archive',
+        tier: 'delete',
+        phase: 'confirm',
+        pair: 'prepare_purge_archive',
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Confirm archive deletion.',
+      },
+    ],
+    skills: [
+      {
+        name: 'close-and-purge',
+        description: 'Close tickets or purge archives safely. Use when asked to close or purge.',
+        uses: ['prepare_close_ticket', 'confirm_close_ticket', 'prepare_purge_archive', 'confirm_purge_archive'],
+      },
+    ],
+  });
+
+  const neutralMd = renderSkill(neutralSpec, neutralSpec.skills[0]);
+  assert.doesNotMatch(neutralMd, /approved_strategy/);
+  assert.doesNotMatch(neutralMd, /confirmation_mode/);
+  assert.match(neutralMd, /STOP and wait for explicit user approval in a separate turn/);
+  assert.match(neutralMd, /never infer approval from the prepare response alone/);
+
+  const delegatedSpec = normalizeSpec({
+    name: 'delegated-product',
+    purpose: 'Product with explicit server-verified delegated policy.',
+    delegatedApprovalMode: 'approved_runbook',
+    tools: neutralSpec.tools,
+    skills: neutralSpec.skills,
+  });
+  const delegatedMd = renderSkill(delegatedSpec, delegatedSpec.skills[0]);
+  assert.match(delegatedMd, /confirmation_mode=approved_runbook/);
+  assert.match(delegatedMd, /or approved_runbook verified by the server/);
+});
+
+test('orphan skill detection and build --prune remove unedited managed orphans while protecting hand-edited and unmanaged skills (#12)', () => {
+  const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  assert.ok(pkg.files.includes('examples'), 'package.json files must ship examples/');
+
+  const dir = mkdtempSync(join(tmpdir(), 'mcp-surface-prune-'));
+  const initialRaw = {
+    name: 'prune-demo',
+    purpose: 'Test orphan skill detection and pruning.',
+    copySkillsTo: ['.claude/skills'],
+    tools: [
+      {
+        name: 'get_items',
+        tier: 'read',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        description: 'Read items.',
+      },
+    ],
+    skills: [
+      {
+        name: 'keep-skill',
+        description: 'Keep this skill. Use when listing items.',
+        uses: ['get_items'],
+      },
+      {
+        name: 'old-skill',
+        description: 'Old skill to be removed. Use when migrating.',
+        uses: ['get_items'],
+      },
+    ],
+  };
+
+  applyBuild(planBuild(normalizeSpec(initialRaw), dir));
+  // Add an unmanaged hand-written skill alongside managed skills
+  const unmanagedPath = join(dir, '.claude', 'skills', 'manual-helper', 'SKILL.md');
+  mkdirSync(dirname(unmanagedPath), { recursive: true });
+  writeFileSync(unmanagedPath, '---\nname: manual-helper\ndescription: Custom. Use when custom.\n---\n# Custom\n', 'utf8');
+
+  // Remove old-skill from spec
+  const nextSpec = normalizeSpec({
+    ...initialRaw,
+    skills: [initialRaw.skills[0]],
+  });
+
+  // Without --prune, old-skill stays on disk; with --prune, 2 managed copies are scheduled for deletion
+  const noPrunePlan = planBuild(nextSpec, dir);
+  assert.equal(noPrunePlan.counts.delete, 0);
+
+  const prunePlan = planBuild(nextSpec, dir, { prune: true });
+  assert.equal(prunePlan.counts.delete, 2);
+  assert.equal(prunePlan.counts.conflict, 0);
+
+  // Hand-edit one orphan copy -> conflict unless --force is passed
+  const claudeOrphan = join(dir, '.claude', 'skills', 'old-skill', 'SKILL.md');
+  writeFileSync(claudeOrphan, readFileSync(claudeOrphan, 'utf8') + '\nHand note\n', 'utf8');
+  const conflictPlan = planBuild(nextSpec, dir, { prune: true });
+  assert.equal(conflictPlan.counts.conflict, 1);
+  assert.throws(() => applyBuild(conflictPlan), /Refusing to overwrite conflicting skill file/);
+  assert.equal(existsSync(claudeOrphan), true);
+
+  // With force + prune, orphan is deleted and unmanaged skill remains untouched
+  const forcedPrune = planBuild(nextSpec, dir, { prune: true, force: true });
+  assert.equal(forcedPrune.counts.delete, 2);
+  applyBuild(forcedPrune, { force: true });
+  assert.equal(existsSync(join(dir, '.mcp-surface', 'skills', 'old-skill')), false);
+  assert.equal(existsSync(join(dir, '.claude', 'skills', 'old-skill')), false);
+  assert.equal(existsSync(unmanagedPath), true);
+});

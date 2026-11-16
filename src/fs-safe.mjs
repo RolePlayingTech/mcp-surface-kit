@@ -144,6 +144,7 @@ export function safeJoin(root, relPath) {
 export function applyFilePlan(operations, assertSafe, io = fs) {
   const applied = [];
   const createdDirs = [];
+  const prunedDirs = [];
   function ensureDirectory(dir) {
     if (io.existsSync(dir)) return;
     ensureDirectory(dirname(dir));
@@ -168,18 +169,40 @@ export function applyFilePlan(operations, assertSafe, io = fs) {
         }
       } else {
         applied.push(op);
-        if (op.after === null) io.unlinkSync(op.path);
-        else io.writeFileSync(op.path, op.after);
+        if (op.after === null) {
+          io.unlinkSync(op.path);
+          const parentDir = dirname(op.path);
+          if (io.readdirSync && io.rmdirSync) {
+            try {
+              if (io.existsSync(parentDir) && io.readdirSync(parentDir).length === 0) {
+                io.rmdirSync(parentDir);
+                prunedDirs.push(parentDir);
+              }
+            } catch {
+              // Keep non-empty or non-removable parent directory intact.
+            }
+          }
+        } else {
+          io.writeFileSync(op.path, op.after);
+        }
       }
     }
   } catch (cause) {
     const failures = [];
+    for (const dir of prunedDirs.reverse()) {
+      try {
+        if (!io.existsSync(dir)) io.mkdirSync(dir);
+      } catch (error) {
+        failures.push(`${dir}: ${error.message}`);
+      }
+    }
     for (const op of applied.reverse()) {
       try {
         assertSafe(op.path);
         if (op.before === null) {
           if (io.existsSync(op.path)) io.unlinkSync(op.path);
         } else {
+          ensureDirectory(dirname(op.path));
           io.writeFileSync(op.path, op.before);
         }
       } catch (error) {

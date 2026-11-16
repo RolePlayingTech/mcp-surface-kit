@@ -7,6 +7,8 @@ export const TIERS = ['read', 'draft', 'mutate', 'delete'];
 export const PHASES = ['prepare', 'confirm'];
 export const DELETE_GUARDS = ['local_draft_only'];
 export const SCOPE_MODELS = ['cumulative', 'independent', 'hierarchy'];
+export const TRANSPORTS = ['streamable-http', 'stdio', 'sse'];
+export const OPERATION_NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 export const ROOT_KEYS = [
   '$schema',
   'name',
@@ -14,6 +16,7 @@ export const ROOT_KEYS = [
   'transport',
   'resourceUrl',
   'scopeModel',
+  'delegatedApprovalMode',
   'scopes',
   'scopeHierarchy',
   'untrustedFields',
@@ -30,6 +33,7 @@ export const TOOL_KEYS = [
   'pair',
   'guard',
   'description',
+  'delegatedApprovalMode',
   'liveInOneCall',
   'annotations',
 ];
@@ -39,6 +43,12 @@ export const EXTENSION_KEY_RE = /^x-[a-zA-Z0-9][a-zA-Z0-9_-]*$/;
 
 export function isExtensionKey(key) {
   return EXTENSION_KEY_RE.test(String(key));
+}
+
+function typeLabel(val) {
+  if (val === null) return 'null';
+  if (Array.isArray(val)) return 'array';
+  return typeof val;
 }
 
 const KNOWN_KEY_SUGGESTIONS = {
@@ -156,6 +166,32 @@ export function loadSpec(dir) {
   return normalizeSpec(raw);
 }
 
+function normalizeStringField(obj, key, pathLabel, invalidFields, defaultValue = '') {
+  const value = obj?.[key];
+  if (value === undefined) return defaultValue;
+  if (typeof value !== 'string') {
+    invalidFields.push(`${pathLabel} must be a string (got ${typeLabel(value)})`);
+    return defaultValue;
+  }
+  return value.trim();
+}
+
+function normalizeStringArray(arr, pathLabel, invalidFields, { dropEmpty = false } = {}) {
+  if (!Array.isArray(arr)) return [];
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const item = arr[i];
+    if (typeof item !== 'string') {
+      invalidFields.push(`${pathLabel}[${i}] must be a string (got ${typeLabel(item)})`);
+      continue;
+    }
+    const trimmed = item.trim();
+    if (dropEmpty && !trimmed) continue;
+    out.push(trimmed);
+  }
+  return out;
+}
+
 export function normalizeSpec(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     throw new Error('spec must be a JSON object');
@@ -176,6 +212,9 @@ export function normalizeSpec(raw) {
     }
   }
 
+  if (raw.$schema !== undefined && typeof raw.$schema !== 'string') {
+    invalidFields.push(`spec.$schema must be a string (got ${typeLabel(raw.$schema)})`);
+  }
   if (raw.scopes !== undefined && !Array.isArray(raw.scopes)) {
     invalidFields.push('spec.scopes must be an array of scope strings');
   }
@@ -201,21 +240,62 @@ export function normalizeSpec(raw) {
   const scopeHierarchy = {};
   if (raw.scopeHierarchy && typeof raw.scopeHierarchy === 'object' && !Array.isArray(raw.scopeHierarchy)) {
     for (const [key, implied] of Object.entries(raw.scopeHierarchy)) {
-      scopeHierarchy[String(key).trim()] = Array.isArray(implied)
-        ? implied.map((item) => String(item).trim()).filter(Boolean)
-        : [];
+      const trimmedKey = key.trim();
+      if (!trimmedKey) {
+        invalidFields.push('spec.scopeHierarchy keys must be non-empty scope strings');
+        continue;
+      }
+      if (!Array.isArray(implied)) {
+        invalidFields.push(`spec.scopeHierarchy["${key}"] must be an array of scope strings (got ${typeLabel(implied)})`);
+        scopeHierarchy[trimmedKey] = [];
+        continue;
+      }
+      scopeHierarchy[trimmedKey] = normalizeStringArray(
+        implied,
+        `spec.scopeHierarchy["${key}"]`,
+        invalidFields,
+        { dropEmpty: true }
+      );
     }
   }
+
+  const name = normalizeStringField(raw, 'name', 'spec.name', invalidFields, '');
+  const purpose = normalizeStringField(raw, 'purpose', 'spec.purpose', invalidFields, '');
+  const transport =
+    raw.transport === undefined
+      ? 'streamable-http'
+      : normalizeStringField(raw, 'transport', 'spec.transport', invalidFields, '');
+  const resourceUrl = normalizeStringField(raw, 'resourceUrl', 'spec.resourceUrl', invalidFields, '');
+  const scopeModel =
+    raw.scopeModel === undefined
+      ? 'cumulative'
+      : normalizeStringField(raw, 'scopeModel', 'spec.scopeModel', invalidFields, '');
+  const delegatedApprovalMode = normalizeStringField(
+    raw,
+    'delegatedApprovalMode',
+    'spec.delegatedApprovalMode',
+    invalidFields,
+    ''
+  );
+  if (delegatedApprovalMode && !OPERATION_NAME_RE.test(delegatedApprovalMode)) {
+    invalidFields.push(
+      `spec.delegatedApprovalMode "${delegatedApprovalMode}" must match ^[A-Za-z0-9_.-]{1,64}$`
+    );
+  }
+
   return {
-    name: String(raw.name || '').trim(),
-    purpose: String(raw.purpose || '').trim(),
-    transport: String(raw.transport || 'streamable-http').trim(),
-    resourceUrl: String(raw.resourceUrl || '').trim(),
-    scopeModel: String(raw.scopeModel || 'cumulative').trim(),
-    scopes: Array.isArray(raw.scopes) ? raw.scopes.map((s) => String(s).trim()) : [],
+    name,
+    purpose,
+    transport,
+    resourceUrl,
+    scopeModel,
+    delegatedApprovalMode,
+    scopes: normalizeStringArray(raw.scopes, 'spec.scopes', invalidFields),
     scopeHierarchy,
-    untrustedFields: Array.isArray(raw.untrustedFields) ? raw.untrustedFields.map((f) => String(f).trim()).filter(Boolean) : [],
-    copySkillsTo: Array.isArray(raw.copySkillsTo) ? raw.copySkillsTo.map((d) => String(d).trim()) : [],
+    untrustedFields: normalizeStringArray(raw.untrustedFields, 'spec.untrustedFields', invalidFields, {
+      dropEmpty: true,
+    }),
+    copySkillsTo: normalizeStringArray(raw.copySkillsTo, 'spec.copySkillsTo', invalidFields),
     tools: Array.isArray(raw.tools) ? raw.tools.map((tool, index) => normalizeTool(tool, index)) : [],
     skills: Array.isArray(raw.skills) ? raw.skills.map((skill, index) => normalizeSkill(skill, index)) : [],
     invalidFields,
@@ -241,6 +321,35 @@ function normalizeTool(tool, index = 0) {
         const hint = suggestForUnknownKey(key, TOOL_KEYS, 'tool');
         invalidFields.push(`unknown field "tools[${index}].${key}" (${hint})`);
       }
+    }
+  }
+
+  const name = normalizeStringField(tool, 'name', `tools[${index}].name`, invalidFields, '');
+  const tier = normalizeStringField(tool, 'tier', `tools[${index}].tier`, invalidFields, '');
+  const scope = normalizeStringField(tool, 'scope', `tools[${index}].scope`, invalidFields, '');
+  const phase = normalizeStringField(tool, 'phase', `tools[${index}].phase`, invalidFields, '');
+  const pair = normalizeStringField(tool, 'pair', `tools[${index}].pair`, invalidFields, '');
+  const guard = normalizeStringField(tool, 'guard', `tools[${index}].guard`, invalidFields, '');
+  const description = normalizeStringField(tool, 'description', `tools[${index}].description`, invalidFields, '');
+  const delegatedApprovalMode = normalizeStringField(
+    tool,
+    'delegatedApprovalMode',
+    `tools[${index}].delegatedApprovalMode`,
+    invalidFields,
+    ''
+  );
+  if (delegatedApprovalMode && !OPERATION_NAME_RE.test(delegatedApprovalMode)) {
+    invalidFields.push(
+      `tools[${index}].delegatedApprovalMode "${delegatedApprovalMode}" must match ^[A-Za-z0-9_.-]{1,64}$`
+    );
+  }
+
+  let liveInOneCall = false;
+  if (tool?.liveInOneCall !== undefined) {
+    if (typeof tool.liveInOneCall !== 'boolean') {
+      invalidFields.push(`tools[${index}].liveInOneCall must be a boolean (got ${typeLabel(tool.liveInOneCall)})`);
+    } else {
+      liveInOneCall = tool.liveInOneCall;
     }
   }
 
@@ -282,10 +391,22 @@ function normalizeTool(tool, index = 0) {
       invalidOperationScopes.push('operationScopes must be a JSON object mapping operation names to scopes');
     } else {
       for (const [op, scopeVal] of Object.entries(tool.operationScopes)) {
-        const opName = String(op).trim();
-        const scName = typeof scopeVal === 'string' ? scopeVal.trim() : '';
-        if (!opName || !scName) {
-          invalidOperationScopes.push(`operationScopes entry "${op}" must map a non-empty operation name to a scope string`);
+        const opName = op.trim();
+        if (!opName || opName !== op || !OPERATION_NAME_RE.test(opName)) {
+          invalidOperationScopes.push(
+            `operationScopes key "${op}" must match ^[A-Za-z0-9_.-]{1,64}$`
+          );
+          continue;
+        }
+        if (typeof scopeVal !== 'string') {
+          invalidOperationScopes.push(
+            `operationScopes.${opName} must be a scope string (got ${typeLabel(scopeVal)})`
+          );
+          continue;
+        }
+        const scName = scopeVal.trim();
+        if (!scName) {
+          invalidOperationScopes.push(`operationScopes.${opName} must map to a non-empty scope string`);
         } else {
           operationScopes[opName] = scName;
         }
@@ -294,15 +415,16 @@ function normalizeTool(tool, index = 0) {
   }
 
   return {
-    name: String(tool?.name || '').trim(),
-    tier: String(tool?.tier || '').trim(),
-    scope: String(tool?.scope || '').trim(),
+    name,
+    tier,
+    scope,
     operationScopes,
-    phase: String(tool?.phase || '').trim(),
-    pair: String(tool?.pair || '').trim(),
-    guard: String(tool?.guard || '').trim(),
-    description: String(tool?.description || '').trim(),
-    liveInOneCall: Boolean(tool?.liveInOneCall),
+    phase,
+    pair,
+    guard,
+    description,
+    delegatedApprovalMode,
+    liveInOneCall,
     annotations: {
       readOnlyHint,
       destructiveHint,
@@ -331,10 +453,12 @@ function normalizeSkill(skill, index = 0) {
       invalidFields.push(`skills[${index}].uses must be an array of tool names`);
     }
   }
+  const name = normalizeStringField(skill, 'name', `skills[${index}].name`, invalidFields, '');
+  const rawDesc = normalizeStringField(skill, 'description', `skills[${index}].description`, invalidFields, '');
   return {
-    name: String(skill?.name || '').trim(),
-    description: String(skill?.description || '').replace(/\r\n?/g, '\n').trim(),
-    uses: Array.isArray(skill?.uses) ? skill.uses.map((u) => String(u).trim()) : [],
+    name,
+    description: rawDesc.replace(/\r\n?/g, '\n').trim(),
+    uses: normalizeStringArray(skill?.uses, `skills[${index}].uses`, invalidFields),
     invalidFields,
   };
 }

@@ -4,6 +4,7 @@
   "transport": "streamable-http",
   "resourceUrl": "https://mcp.example.com/mcp",
   "scopeModel": "cumulative",
+  "delegatedApprovalMode": "approved_strategy",
   "scopes": ["read", "drafts", "schedule", "publish"],
   "untrustedFields": ["caption", "comment_text", "article_html", "image_text"],
   "copySkillsTo": [".claude/skills"],
