@@ -1,8 +1,14 @@
+import { findOrphanSkills } from './build.mjs';
 import { normalizeRelPath, validateCopyTarget, validateSkillName, validateToolName } from './fs-safe.mjs';
-import { DELETE_GUARDS, PHASES, SCOPE_MODELS, TIERS } from './spec.mjs';
+import { DELETE_GUARDS, PHASES, SCOPE_MODELS, TIERS, TRANSPORTS } from './spec.mjs';
 
 const USE_WHEN = /use when|używaj, gdy|używać, gdy/i;
 const MULTI_AGENT_SKILL_DIRS = new Set(['.agents/skills', '.claude/skills', '.cursor/skills']);
+
+function isLoopbackHost(hostname) {
+  const h = String(hostname || '').toLowerCase();
+  return h === 'localhost' || h === '[::1]' || h === '::1' || /^127(?:\.\d{1,3}){3}$/.test(h);
+}
 
 function hasHierarchyCycle(hierarchy) {
   const visiting = new Set();
@@ -24,7 +30,7 @@ function hasHierarchyCycle(hierarchy) {
   return false;
 }
 
-export function checkSpec(spec) {
+export function checkSpec(spec, { dir } = {}) {
   const errors = [];
   const warnings = [];
   for (const msg of spec.invalidFields || []) {
@@ -33,6 +39,36 @@ export function checkSpec(spec) {
   if (!spec.name) errors.push('spec.name is required.');
   if (!spec.purpose) errors.push('spec.purpose is required (one sentence).');
   if (!spec.tools.length) errors.push('spec.tools must list at least one tool.');
+
+  const transportValue = spec.transport ?? 'streamable-http';
+  if (!TRANSPORTS.includes(transportValue)) {
+    errors.push(`spec.transport must be one of ${TRANSPORTS.join(', ')}`);
+  } else if (transportValue === 'sse') {
+    warnings.push('spec.transport "sse" is deprecated in MCP; prefer "streamable-http"');
+  }
+
+  if (spec.resourceUrl) {
+    let parsedUrl = null;
+    try {
+      parsedUrl = new URL(spec.resourceUrl);
+    } catch {
+      errors.push(`spec.resourceUrl "${spec.resourceUrl}" is not a valid URL`);
+    }
+    if (parsedUrl) {
+      if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+        errors.push(`spec.resourceUrl must use https: or http: scheme (got "${parsedUrl.protocol}")`);
+      } else {
+        if (transportValue === 'stdio') {
+          warnings.push('spec.resourceUrl is set while spec.transport is "stdio"');
+        }
+        if (parsedUrl.protocol === 'http:' && !isLoopbackHost(parsedUrl.hostname)) {
+          warnings.push(
+            `spec.resourceUrl uses plaintext http:// on non-loopback host "${parsedUrl.hostname}"; use https:// to protect credentials`
+          );
+        }
+      }
+    }
+  }
 
   if (!SCOPE_MODELS.includes(spec.scopeModel)) {
     errors.push(`spec.scopeModel must be one of ${SCOPE_MODELS.join(', ')}`);
@@ -50,7 +86,14 @@ export function checkSpec(spec) {
     seenScopes.add(scope);
   }
 
-  if (spec.scopeHierarchy && Object.keys(spec.scopeHierarchy).length > 0) {
+  const hasHierarchyEntries = Boolean(spec.scopeHierarchy && Object.keys(spec.scopeHierarchy).length > 0);
+  if (spec.scopeModel === 'hierarchy' && !hasHierarchyEntries) {
+    errors.push('spec.scopeModel is "hierarchy" but spec.scopeHierarchy is empty');
+  } else if (SCOPE_MODELS.includes(spec.scopeModel) && spec.scopeModel !== 'hierarchy' && hasHierarchyEntries) {
+    errors.push(`spec.scopeHierarchy is only valid when spec.scopeModel is "hierarchy" (got "${spec.scopeModel}")`);
+  }
+
+  if (hasHierarchyEntries) {
     for (const [parent, implied] of Object.entries(spec.scopeHierarchy)) {
       if (!seenScopes.has(parent)) {
         errors.push(`spec.scopeHierarchy key "${parent}" is not in spec.scopes`);
@@ -230,7 +273,7 @@ export function checkSpec(spec) {
 
     if (spec.scopes.length > 0) {
       const opEntries = Object.entries(tool.operationScopes || {});
-      if (!tool.scope && opEntries.length === 0) {
+      if (!tool.scope && opEntries.length === 0 && (tool.invalidOperationScopes || []).length === 0) {
         errors.push(`${tool.name}: scope (or operationScopes) is required when spec.scopes is declared`);
       }
       if (tool.scope && !seenScopes.has(tool.scope)) {
@@ -304,6 +347,11 @@ export function checkSpec(spec) {
       const partnerOps = JSON.stringify(Object.entries(partner.operationScopes || {}).sort());
       if (tool.scope !== partner.scope || toolOps !== partnerOps) {
         errors.push(`${tool.name} and ${partner.name} must declare matching scope and operationScopes`);
+      }
+      const toolDelegated = tool.delegatedApprovalMode || spec.delegatedApprovalMode || '';
+      const partnerDelegated = partner.delegatedApprovalMode || spec.delegatedApprovalMode || '';
+      if (toolDelegated !== partnerDelegated) {
+        errors.push(`${tool.name} and ${partner.name} must declare matching delegatedApprovalMode`);
       }
     }
   }
@@ -385,6 +433,14 @@ export function checkSpec(spec) {
   });
   for (const tool of unused) {
     warnings.push(`${tool.name}: no skill lists this tool in uses`);
+  }
+
+  if (dir) {
+    for (const orphan of findOrphanSkills(spec, dir)) {
+      warnings.push(
+        `orphan managed skill "${orphan.relPath}" is not in spec.skills; run "mcp-surface build --prune" to remove it`
+      );
+    }
   }
 
   return { ok: errors.length === 0, errors, warnings };

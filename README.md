@@ -36,8 +36,8 @@ It does **not** prove that your server implementation enforces the spec at runti
 ```bash
 npx github:RolePlayingTech/mcp-surface-kit explain [dir] [--strict] [--json]
 npx github:RolePlayingTech/mcp-surface-kit check [dir] [--strict] [--json]
-npx github:RolePlayingTech/mcp-surface-kit build [dir] --dry-run [--json]
-npx github:RolePlayingTech/mcp-surface-kit build [dir] [--force] [--json]
+npx github:RolePlayingTech/mcp-surface-kit build [dir] --dry-run [--prune] [--json]
+npx github:RolePlayingTech/mcp-surface-kit build [dir] [--prune] [--force] [--json]
 ```
 
 From this repository:
@@ -113,8 +113,8 @@ Because every entry in `skills[].uses` is rendered as a sequential step in that 
 
 Every object level enforces an explicit allowlist. Any unknown or misspelled key fails `check` (and `check --strict`) with its JSON path and a suggested fix:
 
-- **Root (`spec.json`)**: `name` (required), `purpose` (required), `tools` (required), `skills`, `transport`, `resourceUrl`, `scopeModel`, `scopes`, `scopeHierarchy`, `untrustedFields`, `copySkillsTo`, `$schema`.
-- **Tool (`tools[]`)**: `name` (required), `tier` (required), `description` (required), `annotations`, `scope`, `operationScopes`, `phase`, `pair`, `guard`, `liveInOneCall`.
+- **Root (`spec.json`)**: `name` (required), `purpose` (required), `tools` (required), `skills`, `transport` (`streamable-http` | `stdio` | `sse`), `resourceUrl`, `scopeModel`, `delegatedApprovalMode`, `scopes`, `scopeHierarchy`, `untrustedFields`, `copySkillsTo`, `$schema`.
+- **Tool (`tools[]`)**: `name` (required), `tier` (required), `description` (required), `annotations`, `scope`, `operationScopes`, `phase`, `pair`, `guard`, `delegatedApprovalMode`, `liveInOneCall`.
 - **Tool annotations (`tools[].annotations`)**: `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` (all booleans).
 - **Skill (`skills[]`)**: `name` (required), `description` (required, must include `"Use when …"` / `"Używaj, gdy …"`), `uses` (required, ordered tool names).
 - **Namespaced extensions (`x-*`)**: custom metadata keys matching `^x-[a-zA-Z0-9][a-zA-Z0-9_-]*$` (for example `"x-owner": "platform"` or `"x-version": 1`) are allowed at the root, `tools[]`, `tools[].annotations`, and `skills[]` without triggering unknown-field errors.

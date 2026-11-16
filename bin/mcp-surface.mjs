@@ -23,6 +23,7 @@ Commands:
 Options:
   --strict    check/explain: treat warnings as failures (exit 1).
   --dry-run   build: preview create/update/unchanged/conflict status and diffs without writing.
+  --prune     build: remove orphaned managed SKILL.md files no longer in spec.skills.
   --force     build: overwrite conflicting hand-edited or unmanaged SKILL.md files.
   --json      Output machine-readable JSON (explain, check, build).
   -h, --help  Show this help.
@@ -36,11 +37,12 @@ Typical flow:
 }
 
 export function parse(argv) {
-  const flags = { dryRun: false, force: false, strict: false, json: false };
+  const flags = { dryRun: false, force: false, prune: false, strict: false, json: false };
   const positionals = [];
   for (const arg of argv) {
     if (arg === '--dry-run') flags.dryRun = true;
     else if (arg === '--force') flags.force = true;
+    else if (arg === '--prune') flags.prune = true;
     else if (arg === '--strict') flags.strict = true;
     else if (arg === '--json') flags.json = true;
     else if (arg === '-h' || arg === '--help') positionals.unshift('help');
@@ -51,8 +53,9 @@ export function parse(argv) {
   if (positionals.length > 2) {
     throw new Error(`Unexpected argument "${positionals[2]}". Usage: mcp-surface <command> [dir] [options]`);
   }
-  if ((flags.dryRun || flags.force) && command !== 'build' && command !== 'help') {
-    throw new Error(`Option ${flags.dryRun ? '--dry-run' : '--force'} is only valid with "build".`);
+  if ((flags.dryRun || flags.force || flags.prune) && command !== 'build' && command !== 'help') {
+    const badFlag = flags.dryRun ? '--dry-run' : flags.force ? '--force' : '--prune';
+    throw new Error(`Option ${badFlag} is only valid with "build".`);
   }
   return { command, dir: resolve(positionals[1] || '.'), flags };
 }
@@ -73,7 +76,7 @@ export function run(argv = process.argv.slice(2)) {
     throw new Error(`No ${path}. Write .mcp-surface/spec.json first.`);
   }
   const spec = loadSpec(dir);
-  const check = checkSpec(spec);
+  const check = checkSpec(spec, { dir });
   const passed = check.ok && (!flags.strict || check.warnings.length === 0);
 
   if (command === 'explain') {
@@ -130,6 +133,7 @@ export function run(argv = process.argv.slice(2)) {
     const payload = {
       ok: false,
       dryRun: flags.dryRun,
+      pruned: flags.prune,
       forced: flags.force,
       errors: check.errors,
       warnings: check.warnings,
@@ -145,14 +149,16 @@ export function run(argv = process.argv.slice(2)) {
     };
   }
 
-  const planned = planBuild(spec, dir, { force: flags.force });
+  const planned = planBuild(spec, dir, { force: flags.force, prune: flags.prune });
   const counts = planned.counts;
   const hasConflicts = counts.conflict > 0 && !flags.force;
+  const deleteClause = flags.prune || counts.delete > 0 ? `, delete: ${counts.delete}` : '';
 
   if (flags.dryRun) {
     const payload = {
       ok: !hasConflicts,
       dryRun: true,
+      pruned: flags.prune,
       forced: flags.force,
       counts,
       files: planned.map((f) => ({
@@ -167,11 +173,11 @@ export function run(argv = process.argv.slice(2)) {
       return { code: hasConflicts ? 1 : 0, text: formatJson(payload), data: payload, check, spec, files: planned };
     }
     const lines = [
-      `Dry run (nothing written) — create: ${counts.create}, update: ${counts.update}, unchanged: ${counts.unchanged}, conflict: ${counts.conflict}:`,
+      `Dry run (nothing written) — create: ${counts.create}, update: ${counts.update}${deleteClause}, unchanged: ${counts.unchanged}, conflict: ${counts.conflict}:`,
       ...planned.map((file) => `  [${file.action.padEnd(9)}] ${file.relPath} (${file.reason})`),
     ];
     const diffs = planned
-      .filter((f) => f.diff && ['create', 'update', 'conflict'].includes(f.action))
+      .filter((f) => f.diff && ['create', 'update', 'delete', 'conflict'].includes(f.action))
       .map((f) => f.diff);
     if (diffs.length) {
       lines.push('', ...diffs);
@@ -186,6 +192,7 @@ export function run(argv = process.argv.slice(2)) {
     const payload = {
       ok: false,
       dryRun: false,
+      pruned: flags.prune,
       forced: false,
       counts,
       conflicts: planned
@@ -209,11 +216,14 @@ export function run(argv = process.argv.slice(2)) {
 
   const files = applyBuild(planned, { dryRun: false, force: flags.force });
   const writtenCount = counts.create + counts.update;
+  const deletedCount = counts.delete;
   const payload = {
     ok: true,
     dryRun: false,
+    pruned: flags.prune,
     forced: flags.force,
     written: writtenCount,
+    deleted: deletedCount,
     counts,
     files: files.map((f) => ({
       path: f.relPath,
@@ -225,10 +235,12 @@ export function run(argv = process.argv.slice(2)) {
   if (flags.json) {
     return { code: 0, text: formatJson(payload), data: payload, check, spec, files };
   }
+  let header = `All ${files.length} skill file(s) already up to date:`;
+  if (writtenCount > 0 || deletedCount > 0) {
+    header = `Wrote ${writtenCount} skill file(s) (create: ${counts.create}, update: ${counts.update}${deleteClause}, unchanged: ${counts.unchanged}):`;
+  }
   const lines = [
-    writtenCount > 0
-      ? `Wrote ${writtenCount} skill file(s) (create: ${counts.create}, update: ${counts.update}, unchanged: ${counts.unchanged}):`
-      : `All ${files.length} skill file(s) already up to date:`,
+    header,
     ...files.map((file) => `  [${file.action.padEnd(9)}] ${file.relPath}`),
   ];
   return { code: 0, text: lines.join('\n'), data: payload, check, spec, files };

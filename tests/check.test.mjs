@@ -557,3 +557,165 @@ test('rejects unknown and misspelled fields at root, product, tools, annotations
   assert.equal(extRes.ok, true, extRes.errors.join('; '));
   assert.equal(extRes.warnings.length, 0, extRes.warnings.join('; '));
 });
+
+test('validates transport, resourceUrl, operationScopes key syntax, and scopeHierarchy consistency (#13)', () => {
+  const invalidTransportAndUrl = normalizeSpec({
+    name: 'bad-transport',
+    purpose: 'Invalid transport and malformed URL.',
+    transport: 'websocket',
+    resourceUrl: 'not-a-url',
+    scopeModel: 'hierarchy',
+    scopes: ['read', 'write'],
+    scopeHierarchy: {},
+    tools: [
+      {
+        name: 'prepare_op',
+        tier: 'mutate',
+        phase: 'prepare',
+        pair: 'confirm_op',
+        scope: 'write',
+        operationScopes: { 'bad key!': 'write' },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Prepare op',
+      },
+      {
+        name: 'confirm_op',
+        tier: 'mutate',
+        phase: 'confirm',
+        pair: 'prepare_op',
+        scope: 'write',
+        operationScopes: { 'bad key!': 'write' },
+        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true },
+        description: 'Confirm op',
+      },
+    ],
+    skills: [
+      {
+        name: 'run-op',
+        description: 'Run op. Use when requested.',
+        uses: ['prepare_op', 'confirm_op'],
+      },
+    ],
+  });
+  const res1 = checkSpec(invalidTransportAndUrl);
+  assert.equal(res1.ok, false);
+  assert.ok(res1.errors.some((e) => e.includes('spec.transport must be one of streamable-http, stdio, sse')));
+  assert.ok(res1.errors.some((e) => e.includes('spec.resourceUrl "not-a-url" is not a valid URL')));
+  assert.ok(res1.errors.some((e) => e.includes('spec.scopeModel is "hierarchy" but spec.scopeHierarchy is empty')));
+  assert.ok(res1.errors.some((e) => e.includes('operationScopes key "bad key!" must match')));
+
+  const cumulativeWithHierarchy = normalizeSpec({
+    name: 'mismatch-hierarchy',
+    purpose: 'Cumulative model with hierarchy map.',
+    transport: 'sse',
+    resourceUrl: 'http://mcp.example.com/mcp',
+    scopeModel: 'cumulative',
+    scopes: ['read', 'write'],
+    scopeHierarchy: { write: ['read'] },
+    tools: [
+      {
+        name: 'get_state',
+        tier: 'read',
+        scope: 'read',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        description: 'Read state',
+      },
+    ],
+    skills: [
+      {
+        name: 'read-state',
+        description: 'Read state. Use when inspecting.',
+        uses: ['get_state'],
+      },
+    ],
+  });
+  const res2 = checkSpec(cumulativeWithHierarchy);
+  assert.equal(res2.ok, false);
+  assert.ok(res2.errors.some((e) => e.includes('spec.scopeHierarchy is only valid when spec.scopeModel is "hierarchy"')));
+  assert.ok(res2.warnings.some((w) => w.includes('spec.transport "sse" is deprecated')));
+  assert.ok(res2.warnings.some((w) => w.includes('plaintext http:// on non-loopback host')));
+
+  // Loopback http:// for local dev does not warn, whereas stdio + resourceUrl warns
+  const loopbackHttp = normalizeSpec({
+    name: 'local-dev',
+    purpose: 'Local loopback MCP.',
+    transport: 'streamable-http',
+    resourceUrl: 'http://127.0.0.1:8902/mcp',
+    tools: [
+      {
+        name: 'get_state',
+        tier: 'read',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+        description: 'Read state',
+      },
+    ],
+    skills: [
+      {
+        name: 'read-state',
+        description: 'Read state. Use when inspecting.',
+        uses: ['get_state'],
+      },
+    ],
+  });
+  const res3 = checkSpec(loopbackHttp);
+  assert.equal(res3.ok, true, res3.errors.join('; '));
+  assert.equal(res3.warnings.length, 0, res3.warnings.join('; '));
+
+  const stdioWithUrl = normalizeSpec({
+    ...loopbackHttp,
+    transport: 'stdio',
+    resourceUrl: 'https://mcp.example.com/mcp',
+  });
+  const res4 = checkSpec(stdioWithUrl);
+  assert.equal(res4.ok, true);
+  assert.ok(res4.warnings.some((w) => w.includes('spec.resourceUrl is set while spec.transport is "stdio"')));
+});
+
+test('rejects wrong JSON value types on scopes, untrustedFields, tool.scope, liveInOneCall, and skills.uses (#15)', () => {
+  const spec = normalizeSpec({
+    name: 'bad-types',
+    purpose: 'Demonstrate rejection of non-string scope declarations.',
+    scopeModel: 'cumulative',
+    scopes: ['read', 123],
+    untrustedFields: [false],
+    copySkillsTo: [42],
+    tools: [
+      {
+        name: 'get_state',
+        tier: 'read',
+        scope: 'read',
+        liveInOneCall: 'false',
+        description: 'Read workspace state.',
+        annotations: { readOnlyHint: true, openWorldHint: false },
+      },
+      {
+        name: 'create_draft',
+        tier: 'draft',
+        scope: 123,
+        description: 'Save a draft only.',
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false,
+        },
+      },
+    ],
+    skills: [
+      {
+        name: 'create-draft',
+        description: 'Read state and save a draft. Use when the user requests a draft.',
+        uses: ['get_state', 'create_draft', 999],
+      },
+    ],
+  });
+
+  const res = checkSpec(spec);
+  assert.equal(res.ok, false);
+  assert.ok(res.errors.some((e) => e.includes('spec.scopes[1] must be a string (got number)')));
+  assert.ok(res.errors.some((e) => e.includes('spec.untrustedFields[0] must be a string (got boolean)')));
+  assert.ok(res.errors.some((e) => e.includes('spec.copySkillsTo[0] must be a string (got number)')));
+  assert.ok(res.errors.some((e) => e.includes('get_state: tools[0].liveInOneCall must be a boolean (got string)')));
+  assert.ok(res.errors.some((e) => e.includes('create_draft: tools[1].scope must be a string (got number)')));
+  assert.ok(res.errors.some((e) => e.includes('create-draft: skills[0].uses[2] must be a string (got number)')));
+});
